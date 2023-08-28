@@ -1,155 +1,50 @@
-# zeth
+# Zeth As a Service (ZaaS)
 
-Zeth is an open-source ZK block prover for Ethereum built on the RISC Zero zkVM.
+You can view the service [here](http://net-lb-bd44876-1703206818.us-east-1.elb.amazonaws.com:3000/): 
 
-Zeth makes it possible to *prove* that a given Ethereum block is valid
-(i.e., is the result of applying the given list of transactions to the parent block)
-*without* relying on the validator or sync committees.
-This is because Zeth does *all* the work needed to construct a new block *from within the zkVM*, including:
+This repo contains a full deployment of Risc0's Zeth. Component includes:
 
-* Verifying transaction signatures.
-* Verifying account & storage state against the parent block’s state root.
-* Applying transactions.
-* Paying the block reward.
-* Updating the state root.
-* Etc.
+- **verification_app** - Simple react form to pass data to zeth.
+- **zeth**: I used a modified zeth instance, taking out the CLI (Clap), and converting it to a web service (actix). 
+- **infrastructure** : With typescript / Pulumi , we deploy the front end and zeth to ECS , and use an Application Gateway for rate limiting and access control (i.e. we only want the front end interacting with zeth). 
 
-After constructing the new block, Zeth calculates and outputs the block hash.
-By running this process within the zkVM, we obtain a ZK proof that the new block is valid.
-
-## Status
-
-Zeth is experimental and may still contain bugs.
-
-## Usage
-
-### Building
-
-- Install the `cargo risczero` tool and the `risc0` toolchain:
-
-```console
-$ cargo install cargo-risczero
-$ cargo risczero install
+```mermaid
+graph TD
+    A[Cluster] --> B[ApplicationLoadBalancer]
+    B --> C[Listener: web]
+    B --> D[Listener: zethListener]
+    E[ECR Repository: app_repository] --> F[ECR Image: app]
+    G[ECR Repository: zeth_repository] --> H[ECR Image: zeth]
+    I[FargateService: appService] --> J[Container: appServiceContainer]
+    I --> K[Container: zethServiceContainer]
+    J --> F
+    K --> H
+    L[CloudWatch LogGroup: appServiceLogGroup] --> J
+    M[CloudWatch LogGroup: zethServiceLogGroup] --> K
 ```
 
-- Clone the repository and build with `cargo`:
+## Running
 
-```console
-$ cargo build --release
-```
+- The entire stack is deployed with [Pulumi](https://www.pulumi.com/docs/). It assumes that the repository is cloned at `$HOME/zaas`. 
+- In order to run configuration checks and set up pulumi backend, run `make setup` from the root directory.
+- Once the previous step is completed, run `make deploy`
 
-### Running
 
-Zeth currently has several modes of execution:
+## Improvements / TO-DOs
 
-```
-Usage: zeth [OPTIONS] --block-no=<BLOCK_NO>
+This is a quickmv  prototype and requires significant changes to be production ready.
 
-Options:
-  -r, --rpc-url=<RPC_URL>
-          URL of the chain RPC node
-  -c, --cache[=<CACHE>]
-          Use a local directory as a cache for RPC calls.
-          Accepts an optional custom directory.
-          [default: host/testdata]
-  -n, --network=<NETWORK>
-          Network name [default: ethereum]
-  -b, --block-no=<BLOCK_NO>
-          Block number to validate
-  -l, --local-exec[=<LOCAL_EXEC>]
-          Runs the verification inside the zkvm executor locally.
-          Accepts an optional custom maximum segment cycle count
-          specified as a power of 2.
-          [default: 20 (i.e. ~1M cycles)]
-  -s, --submit-to-bonsai
-          Whether to submit the proving workload to Bonsai
-  -v, --verify-bonsai-receipt-uuid=<VERIFY_BONSAI_RECEIPT_UUID>
-          Bonsai Session UUID to use for receipt verification
-  -h, --help
-          Print help
-  -V, --version
-          Print version
-```
+- Rust
+  - [ ] **Return Values from different stages**: We do not output anything , and all the user gets is a "Verification Successful". We need to refactor the `run_verification` function to return a result or error and propagate that upstream.
+  - [ ] **Error Handling**: Non-existent, everything panics. 
+  - [ ] **Run Asynchronously**: The job takes too long and times out. I have hacked the load balancer to increase time-outs, but ideally we should be returning a response immediately, and polling for a result.
+  - [ ] Web 3 Provider : We should move this to the backend, and match the provider by network
+  
+- Infra
+  - [ ] **DNS**: add a DNS, it's currently hard coded to the loadbalancer.
+  - [ ] **Application Gateway**: Should be added for authentication, and rate limiting
+  - [ ] **Private Service Discovery**: The front end communicates with zeth through the loadbalancer, which is public. The zeth service is necessarily exposed, and it should be done via a private endpoint.
+- Front End
+  - Absolutely nothing. I gave this my all, and refuse to spend any more time on it :grin:
 
-Zeth primarily requires an Ethereum RPC provider.
-Two complementary types of providers are supported:
 
-* RPC provider.
-  This fetches data from a Web2 RPC provider, such as [Alchemy](https://www.alchemy.com/).
-  Specified using the `--rpc-url=<RPC_URL>` parameter.
-* Cached RPC provider.
-  This fetches RPC data from a local file when possible, and falls back to a Web2 RPC provider when necessary.
-  It amends the local file with results from the Web2 provider so that subsequent runs don't require additional Web2 RPC calls.
-  Specified using the `--cache[=CACHE_DIRECTORY]` parameter.
-
-**Quick test mode**.
-This is the default.
-When run in this mode, Zeth does all the work needed to construct an Ethereum block and verifies the correctness
-of the result using the RPC provider.
-No proofs are generated.
-
-```console
-$ RUST_LOG=info ./target/release/zeth \
-    --rpc-url="https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY" \
-    --cache \
-    --block-no=16424130
-```
-
-**Local executor mode**.
-To run in this mode, add the parameter `--local-exec[=SEGMENT_LIMIT]`.
-When run in this mode, Zeth does all the work needed to construct an Ethereum block from within the zkVM's non-proving emulator.
-Correctness of the result is checked using the RPC provider.
-This is useful for measuring the size of the computation (number of execution segments and cycles).
-No proofs are generated.
-
-```console
-$ RUST_LOG=info ./target/release/zeth \
-    --rpc-url="https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY" \
-    --cache \
-    --block-no=16424130 \
-    --local-exec
-```
-
-**Bonsai proving mode**.
-*This mode generates a ZK proof.*
-To run in this mode, add the parameter `--submit-to-bonsai`.
-When run in this mode, Zeth submits a proving task to the [Bonsai proving service](https://www.bonsai.xyz/),
-which then constructs an Ethereum block entirely from within the zkVM.
-This mode checks the correctness of the result using the RPC provider.
-It also outputs the Bonsai session UUID, and polls Bonsai until the proof is complete.
-
-To use this feature, first set the `BONSAI_API_URL` and `BONSAI_API_KEY` environment variables,
-then follow the instructions below for submitting jobs to Bonsai and verifying the proofs.
-
-Need a Bonsai API key? [Sign up today](https://bonsai.xyz/apply).
-
-```console
-$ RUST_LOG=info ./target/release/zeth \
-    --rpc-url="https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY" \
-    --cache \
-    --block-no=16424130 \
-    --submit-to-bonsai
-```
-
-**Bonsai verify mode**.
-*This mode verifies the ZK proof.*
-To run in this mode, add the parameter `--verify-bonsai-receipt-uuid=BONSAI_SESSION_UUID`,
-where `BONSAI_SESSION_UUID` is the session UUID returned by the `--submit-to-bonsai` mode.
-This mode checks the correctness of the result using the RPC provider.
-
-```console
-$ RUST_LOG=info ./target/release/zeth \
-    --rpc-url="https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY" \
-    --cache \
-    --block-no=16424130 \
-    --verify-bonsai-receipt-uuid=BONSAI_SESSION_UUID
-```
-
-## Additional resources
-
-Check out these resources and say hi on our Discord:
-
-* [RISC Zero developer’s portal](https://dev.risczero.com/)
-* [zkVM quick-start guide](https://dev.risczero.com/zkvm/quickstart)
-* [Bonsai quick-start guide](https://dev.risczero.com/bonsai/quickstart)
-* [RISC Zero on Discord](https://discord.gg/risczero)
