@@ -35,10 +35,10 @@ graph TD
 This is a quickmv  prototype and requires significant changes to be production ready.
 
 - Rust
-  - [ ] **Return Values from different stages**: We do not output anything , and all the user gets is a "Verification Successful". We need to refactor the `run_verification` function to return a result or error and propagate that upstream.
+  - [x] **Return Values from different stages**: We do not output anything , and all the user gets is a "Verification Successful". We need to refactor the `run_verification` function to return a result or error and propagate that upstream.
   - [ ] **Error Handling**: Non-existent, everything panics. 
   - [ ] **Run Asynchronously**: The job takes too long and times out. I have hacked the load balancer to increase time-outs, but ideally we should be returning a response immediately, and polling for a result.
-  - [ ] Web 3 Provider : We should move this to the backend, and match the provider by network
+  - [x] Web 3 Provider : We should move this to the backend, and match the provider by network
   
 - Infra
   - [ ] **DNS**: add a DNS, it's currently hard coded to the loadbalancer.
