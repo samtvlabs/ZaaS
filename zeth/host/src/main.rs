@@ -35,15 +35,9 @@ use serde::Deserialize;
 use tempfile::tempdir;
 use zeth_guests::{ETH_BLOCK_ELF, ETH_BLOCK_ID};
 use zeth_lib::{
-    block_builder::BlockBuilder,
-    consts:: ETH_MAINNET_CHAIN_SPEC,
-    execution::EthTxExecStrategy,
-    finalization::DebugBuildFromMemDbStrategy,
-    host::Init,
-    initialization::MemDbInitStrategy,
-    input::Input,
-    mem_db::MemDb,
-    preparation::EthHeaderPrepStrategy,
+    block_builder::BlockBuilder, consts::ETH_MAINNET_CHAIN_SPEC, execution::EthTxExecStrategy,
+    finalization::DebugBuildFromMemDbStrategy, host::Init, initialization::MemDbInitStrategy,
+    input::Input, mem_db::MemDb, preparation::EthHeaderPrepStrategy,
 };
 use zeth_primitives::BlockHash;
 
@@ -112,10 +106,19 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ZethSocket {
 pub struct RunVerification {
     data: Data,
     init: Init,
+    ctx: Addr<ZethSocket>,
 }
 impl actix::Message for RunVerification {
     type Result = ();
 }
+
+// impl actix::Handler<RunVerification> for ZethSocket {
+//     type Result = ();
+
+//     fn handle(&mut self, msg: RunVerification, _: &mut Self::Context) -> Self::Result {
+//         let _ = run_verification(msg.data, msg.init, msg.ctx);
+//     }
+// }
 
 pub struct SendText {
     text: String,
@@ -159,7 +162,7 @@ impl Default for Data {
     fn default() -> Self {
         Self {
             cache: None,
-            network: NetworkSelection::Ethereum,
+            network: NetworkSelection::Ethereum, // Choose a default network
             block_no: 0,
             local_exec: None,
             submit_to_bonsai: false,
@@ -192,6 +195,8 @@ fn cache_file_path(cache_path: &String, network: &String, block_no: u64, ext: &s
 async fn run_verification(
     args: Data,
     init: Init,
+    // ctx: &mut ws::WebsocketContext<ZethSocket>,
+    // ctx: Arc<Mutex<ws::WebsocketContext<ZethSocket>>>,
     ctx: Addr<ZethSocket>,
 ) -> Result<()> {
     let input: Input = init.clone().into();
@@ -203,11 +208,20 @@ async fn run_verification(
                 .expect("Input deserialization failed");
 
             info!("Running from memory ...");
+            // let mut bytes = Bytes::from("Running from memory ...".to_string());
+            // let msg = ws::Message::Text(std::str::from_utf8(&bytes).unwrap().to_string());
+            // stream.send_data(bytes).await?;
+            // ctx.text("Running from memory ...");
+            // ctx.lock().unwrap().text("Running from memory ...");
             let mut message = "Running from memory ...";
 
             ctx.do_send(SendText {
                 text: message.to_owned(),
             });
+
+            // let resp = ws::start(ZethSocket {}, &req, stream);
+
+            // addr.do_send(ws::Message::Text("Running from memory ...".to_string()));
 
             let block_builder = BlockBuilder::<MemDb>::new(&ETH_MAINNET_CHAIN_SPEC, input)
                 .initialize_database::<MemDbInitStrategy>()
@@ -237,11 +251,23 @@ async fn run_verification(
             // ctx.text(message);
             ctx.do_send(SendText { text: message });
 
+            // ctx.text("Memory-backed execution is Done! Database contains {} accounts",
+            // accounts_len);
+            // addr.do_send(ws::Message::Text(format!(
+            //     "Memory-backed execution is Done! Database contains {} accounts",
+            //     accounts_len
+            // )));
 
             // Verify final state
             let message = "Verifying final state using provider data ...".to_owned();
             info!("Verifying final state using provider data ...");
             ctx.do_send(SendText { text: message });
+
+            // addr.do_send(ws::Message::Text(format!(
+            //     "Verifying final state using provider data ..."
+            // )));
+
+            // ctx.text("Verifying final state using provider data ...");
             let errors = zeth_lib::host::verify_state(fini_db, init.fini_proofs, storage_deltas)
                 .expect("Could not verify final state!");
             for (address, address_errors) in &errors {
